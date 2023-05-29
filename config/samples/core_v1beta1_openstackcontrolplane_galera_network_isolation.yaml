@@ -28,12 +28,14 @@ spec:
         - 192.168.122.1
       replicas: 1
   cinder:
+    enabled: false
     apiOverride:
       route: {}
     template:
       databaseInstance: openstack
       secret: osp-secret
       cinderAPI:
+        replicas: 0
         override:
           service:
             internal:
@@ -45,7 +47,7 @@ spec:
               spec:
                 type: LoadBalancer
       cinderScheduler:
-        replicas: 1
+        replicas: 0
       cinderBackup:
         networkAttachments:
         - storage
@@ -56,13 +58,15 @@ spec:
           - storage
           replicas: 0 # backend needs to be configured
   glance:
+    enabled: false # for adoption testing
     apiOverride:
       route: {}
     template:
       databaseInstance: openstack
       storageClass: ""
-      storageRequest: 10G
+      storageRequest: 1G
       glanceAPIInternal:
+        replicas: 1
         override:
           service:
             metadata:
@@ -75,9 +79,11 @@ spec:
         networkAttachments:
         - storage
       glanceAPIExternal:
+        replicas: 0
         networkAttachments:
         - storage
   keystone:
+    enabled: false # for adoption testing
     apiOverride:
       route: {}
     template:
@@ -116,6 +122,7 @@ spec:
       memcached:
         replicas: 1
   neutron:
+    enabled: false # for adoption testing
     apiOverride:
       route: {}
     template:
@@ -134,16 +141,56 @@ spec:
       networkAttachments:
       - internalapi
   horizon:
+    enabled: false
     apiOverride:
       route: {}
     template:
-      replicas: 1
+      replicas: 0
       secret: osp-secret
   nova:
+    enabled: false # for adoption testing
     apiOverride:
       route: {}
     template:
+      # This creates a collapsed cell deployment same as what OSP17 does by
+      # default. The conductor in cell1 acts as both the cell conductor and the
+      # super conductor hence cell0 conductor is disabled. Also in this
+      # deployment both the top level services and cell1 service will share the
+      # same message bus and database service instance so there is no cell
+      # separation implemented.
+      cellTemplates:
+          cell0:
+            cellDatabaseUser: nova_cell0
+            noVNCProxyServiceTemplate:
+              replicas: 0 # must remain 0?
+            metadataServiceTemplate:
+              replicas: 0 # must remain 0?
+            conductorServiceTemplate:
+              replicas: 0 # must remain 0
+            externalEndpoints:
+            - endpoint: internal
+              ipAddressPool: internalapi
+              loadBalancerIPs:
+              - 172.17.0.80
+            hasAPIAccess: true
+          cell1:
+            cellDatabaseUser: nova_cell1
+            cellDatabaseInstance: openstack-cell1
+            cellMessageBusInstance: rabbitmq-cell1
+            noVNCProxyServiceTemplate:
+              replicas: 0 #1, to be started locally
+            metadataServiceTemplate:
+              replicas: 0 #1, to be started locally
+            conductorServiceTemplate:
+              replicas: 0 #1, to be started locally
+            hasAPIAccess: true
+            externalEndpoints:
+            - endpoint: internal
+              ipAddressPool: internalapi
+              loadBalancerIPs:
+              - 172.17.0.80
       apiServiceTemplate:
+        replicas: 0 #1, to be started locally
         override:
           service:
             internal:
@@ -155,6 +202,30 @@ spec:
               spec:
                 type: LoadBalancer
       metadataServiceTemplate:
+        replicas: 0 #1, to be started locally
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.80
+            spec:
+              type: LoadBalancer
+      schedulerServiceTemplate:
+        replicas: 0 #1, to be started locally
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.80
+            spec:
+              type: LoadBalancer
+      noVNCProxyServiceTemplate:
+        replicas: 0 #1, to be started locally, or just for cell1?
+        # FIXME(bogdando): not needed for VNCservice?
         override:
           service:
             metadata:
@@ -166,11 +237,12 @@ spec:
               type: LoadBalancer
       secret: osp-secret
   manila:
+    enabled: false
     apiOverride:
       route: {}
     template:
       manilaAPI:
-        replicas: 1
+        replicas: 0
         networkAttachments:
         - internalapi
         override:
@@ -184,35 +256,43 @@ spec:
               spec:
                 type: LoadBalancer
       manilaScheduler:
-        replicas: 1
+        replicas: 0
+        networkAttachments:
+        - internalapi
       manilaShares:
         share1:
-          replicas: 1
+          replicas: 0
           networkAttachments:
           - storage
   ovn:
     template:
       ovnDBCluster:
         ovndbcluster-nb:
+          replicas: 1
           dbType: NB
-          storageRequest: 10G
+          storageRequest: 1G
           networkAttachment: internalapi
         ovndbcluster-sb:
+          replicas: 1
           dbType: SB
-          storageRequest: 10G
+          storageRequest: 1G
           networkAttachment: internalapi
       ovnNorthd:
+        replicas: 1
         networkAttachment: internalapi
       ovnController:
+        replicas: 1
         external-ids:
           system-id: "random"
           ovn-bridge: "br-int"
           ovn-encap-type: "geneve"
         networkAttachment: tenant
   placement:
+    enabled: false # for adoption testing
     apiOverride:
       route: {}
     template:
+      replicas: 0 # for adoption testing
       override:
         service:
           internal:
@@ -228,6 +308,14 @@ spec:
   rabbitmq:
     templates:
       rabbitmq:
+        replicas: 1
+        resources:
+          requests:
+            cpu: 150m
+            memory: 250Mi
+          limits:
+            cpu: 300m
+            memory: 500Mi
         override:
           service:
             metadata:
@@ -237,6 +325,14 @@ spec:
             spec:
               type: LoadBalancer
       rabbitmq-cell1:
+        replicas: 1
+        resources:
+          requests:
+            cpu: 150m
+            memory: 250Mi
+          limits:
+            cpu: 300m
+            memory: 500Mi
         override:
           service:
             metadata:
@@ -264,7 +360,7 @@ spec:
                   metallb.universe.tf/loadBalancerIPs: 172.17.0.80
               spec:
                 type: LoadBalancer
-        replicas: 1
+        replicas: 0
       heatEngine:
         override:
           service:
@@ -276,39 +372,52 @@ spec:
                   metallb.universe.tf/loadBalancerIPs: 172.17.0.80
               spec:
                 type: LoadBalancer
-        replicas: 1
+        replicas: 0
+      heatCfnAPI:
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: 172.17.0.80
+              spec:
+                type: LoadBalancer
+        replicas: 0
       secret: osp-secret
   ironic:
     enabled: false
     template:
       databaseInstance: openstack
       ironicAPI:
-        replicas: 1
+        replicas: 0
       ironicConductors:
-      - replicas: 1
-        storageRequest: 10G
+      - replicas: 0
+        storageRequest: 1G
       ironicInspector:
-        replicas: 1
+        replicas: 0
       ironicNeutronAgent:
-        replicas: 1
+        replicas: 0
       secret: osp-secret
   ceilometer:
+    enabled: false
     template:
       passwordSelector:
         service: CeilometerPassword
       secret: osp-secret
       serviceUser: ceilometer
   swift:
-    enabled: true
+    enabled: false
     proxyOverride:
       route: {}
     template:
       swiftRing:
-        ringReplicas: 1
+        ringReplicas: 1 # can't be 0
       swiftStorage:
-        replicas: 1
+        replicas: 1 # can't be 0
       swiftProxy:
-        replicas: 1
+        replicas: 1 # can't be 0
         override:
           service:
             internal:
@@ -324,7 +433,7 @@ spec:
     template:
       databaseInstance: openstack
       octaviaAPI:
-        replicas: 1
+        replicas: 0
       secret: osp-secret
   redis:
     enabled: false
